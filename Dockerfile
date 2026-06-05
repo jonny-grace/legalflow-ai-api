@@ -1,8 +1,11 @@
+# ============================================================
+# LegalFlow AI API — Dockerfile
+# Multi-stage build for optimized production image
+# ============================================================
 
 # ── Stage 1: Dependencies ────────────────────────────────────
-FROM node:20-alpine AS deps
+FROM node:22-alpine AS deps
 
-# Alpine Linux needs these for bcrypt compilation
 RUN apk add --no-cache libc6-compat openssl
 
 WORKDIR /app
@@ -11,15 +14,15 @@ WORKDIR /app
 COPY package*.json ./
 COPY prisma ./prisma/
 
-# Install ALL dependencies (including dev)
-# We need devDependencies for the build stage
+# Install ALL dependencies including devDependencies
+# We need @nestjs/cli from devDeps to build
 RUN npm ci
 
 # Generate Prisma client
 RUN npx prisma generate
 
 # ── Stage 2: Builder ─────────────────────────────────────────
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 RUN apk add --no-cache libc6-compat openssl
 
@@ -29,14 +32,17 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/prisma ./prisma
 
-# Copy source code
+# Copy all source files
 COPY . .
 
-# Build the NestJS application
+# Build using nest build (via npm run build)
 RUN npm run build
 
+# Verify the build produced main.js
+RUN test -f dist/main.js && echo "✅ Build successful" || (echo "❌ dist/main.js missing" && exit 1)
+
 # ── Stage 3: Production Runner ────────────────────────────────
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 
 RUN apk add --no-cache libc6-compat openssl
 
@@ -46,29 +52,24 @@ RUN adduser --system --uid 1001 nestjs
 
 WORKDIR /app
 
-# Set production environment
 ENV NODE_ENV=production
 
-# Copy only what we need for production
+# Copy only production artifacts
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/prisma ./prisma
-COPY --from=deps /app/node_modules/.prisma ./node_modules/.prisma
 COPY package*.json ./
 
-# Change ownership to non-root user
+# Set ownership
 RUN chown -R nestjs:nodejs /app
 
-# Switch to non-root user
 USER nestjs
 
-# Expose the application port
 EXPOSE 3001
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3001/api/health', (r) => { process.exit(r.statusCode === 200 ? 0 : 1) })"
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:3001/api/health', (r) => { process.exit(r.statusCode === 200 ? 0 : 1) })" || exit 1
 
-# Start command
-# Runs migrations first then starts the server
+# Run migrations then start server
 CMD ["sh", "-c", "npx prisma migrate deploy && node dist/main"]
