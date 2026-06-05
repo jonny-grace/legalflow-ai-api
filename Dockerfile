@@ -21,21 +21,17 @@ RUN apk add --no-cache libc6-compat openssl
 
 WORKDIR /app
 
-# Copy deps
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/prisma ./prisma
 COPY --from=deps /app/prisma.config.ts ./
 COPY --from=deps /app/tsconfig.json ./
 
-# Copy source
 COPY src ./src
 COPY nest-cli.json ./
 COPY package*.json ./
 
-# Build — dummy URL needed because prisma.config.ts is present
 RUN DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy" npm run build
 
-# Show what was built
 RUN echo "=== dist/ ===" && find dist -name "*.js" | head -20
 
 # ── Stage 3: Production Runner ────────────────────────────────
@@ -53,9 +49,10 @@ ENV NODE_ENV=production
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/prisma.config.ts ./
-COPY --from=builder /app/tsconfig.json ./
 COPY package*.json ./
+
+# Use the JS config — no ts-node needed in production container
+COPY prisma.config.js ./
 
 COPY scripts/entrypoint.sh ./scripts/entrypoint.sh
 

@@ -23,7 +23,8 @@ jobs:
 
       - name: Generate Prisma client
         run: npx prisma generate
-        # No DATABASE_URL needed — generate only reads schema.prisma
+        env:
+          DATABASE_URL: 'postgresql://dummy:dummy@localhost:5432/dummy'
 
       - name: Run TypeScript check
         run: npx tsc --noEmit
@@ -45,9 +46,13 @@ jobs:
 
       - name: Generate Prisma client
         run: npx prisma generate
+        env:
+          DATABASE_URL: 'postgresql://dummy:dummy@localhost:5432/dummy'
 
       - name: Build application
         run: npm run build
+        env:
+          DATABASE_URL: 'postgresql://dummy:dummy@localhost:5432/dummy'
 
       - name: Verify build output
         run: |
@@ -70,4 +75,3 @@ jobs:
           tags: legalflow-ai-api:ci-test
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          # No build-args — DATABASE_URL is runtime only in Prisma 7
