@@ -59,12 +59,12 @@ jobs:
       - name: Generate Prisma client
         run: npx prisma generate
         env:
-          DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/legalflow_test'
+          DATABASE_URL: 'postgresql://neondb_owner:npg_0wiHI3bXceDG@ep-solitary-salad-aqlfn1uy-pooler.c-8.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require'
 
       - name: Build application
         run: npm run build
         env:
-          DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/legalflow_test'
+          DATABASE_URL: 'postgresql://neondb_owner:npg_0wiHI3bXceDG@ep-solitary-salad-aqlfn1uy-pooler.c-8.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require'
 
       - name: Verify build output
         run: |
@@ -95,4 +95,4 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
-            DATABASE_URL=postgresql://postgres:postgres@localhost:5432/legalflow_test
+            DATABASE_URL=postgresql://neondb_owner:npg_0wiHI3bXceDG@ep-solitary-salad-aqlfn1uy-pooler.c-8.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
