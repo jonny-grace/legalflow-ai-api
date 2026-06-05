@@ -4,6 +4,7 @@ import {
   AuditLogsService,
   AuditAction,
 } from '../audit-logs/audit-logs.service';
+import { AiService } from '../ai/ai.service';
 import { CreateCaseDto } from './dto/create-case.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
 import { QueryCasesDto } from './dto/query-cases.dto';
@@ -16,13 +17,16 @@ export class CasesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditLogsService: AuditLogsService,
+    private readonly aiService: AiService,
   ) {}
 
   // ── Create a new case intake ───────────────────────────────
   async create(dto: CreateCaseDto) {
     this.logger.log(`Creating new case for: ${dto.email}`);
 
-    // Save the case to database
+    // Save the case to database first
+    // We save before AI analysis so the case is never lost
+    // even if AI fails
     const newCase = await this.prisma.case.create({
       data: {
         clientName: dto.clientName.trim(),
@@ -32,9 +36,7 @@ export class CasesService {
       },
     });
 
-    // Create audit log entry
-    // userId is null because no staff member is logged in
-    // This action is performed by the public client
+    // Create audit log for case creation
     await this.auditLogsService.create({
       caseId: newCase.id,
       userId: undefined,
@@ -45,9 +47,31 @@ export class CasesService {
       },
     });
 
-    this.logger.log(`Case created successfully: ${newCase.id}`);
+    this.logger.log(`Case saved: ${newCase.id}. Triggering AI analysis...`);
 
-    return newCase;
+    // Trigger AI analysis
+    // We run this after saving the case
+    // If AI fails, the case still exists — we just won't have analysis yet
+    let aiAnalysis = null;
+
+    try {
+      aiAnalysis = await this.aiService.analyzeCase(newCase.id);
+    } catch (error) {
+      // AI failure does NOT fail the intake submission
+      // The case is already saved — client gets confirmation
+      // Staff will see the case without AI analysis
+      this.logger.error(
+        `AI analysis failed for case ${newCase.id}: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }. Case saved successfully without analysis.`,
+      );
+    }
+
+    // Return case with analysis if available
+    return {
+      ...newCase,
+      aiAnalysis,
+    };
   }
 
   // ── Get paginated case list with filters ───────────────────
@@ -57,15 +81,12 @@ export class CasesService {
     const skip = (page - 1) * limit;
 
     // Build dynamic where clause
-    // Only add filters that were actually provided
     const where: Prisma.CaseWhereInput = {};
 
-    // Status filter
     if (status) {
       where.status = status;
     }
 
-    // Search by name or email
     if (search) {
       where.OR = [
         {
@@ -83,8 +104,6 @@ export class CasesService {
       ];
     }
 
-    // Priority and caseType filters go through the
-    // related AiAnalysis table
     if (priority || caseType) {
       where.aiAnalysis = {};
 
@@ -100,7 +119,7 @@ export class CasesService {
       }
     }
 
-    // Run count and data queries in parallel for performance
+    // Run count and data queries in parallel
     const [total, cases] = await Promise.all([
       this.prisma.case.count({ where }),
       this.prisma.case.findMany({
@@ -111,13 +130,12 @@ export class CasesService {
           createdAt: 'desc',
         },
         include: {
-          // Include only the fields we need for the list view
-          // Not the full description or audit logs
           aiAnalysis: {
             select: {
               caseType: true,
               priority: true,
               summary: true,
+              confidenceScore: true,
             },
           },
         },
@@ -140,9 +158,7 @@ export class CasesService {
     const foundCase = await this.prisma.case.findUnique({
       where: { id },
       include: {
-        // Full AI analysis
         aiAnalysis: true,
-        // Full audit log with user details
         auditLogs: {
           include: {
             user: {
@@ -169,7 +185,6 @@ export class CasesService {
 
   // ── Update case status ─────────────────────────────────────
   async updateStatus(id: string, dto: UpdateStatusDto, userId: string) {
-    // First verify the case exists
     const existingCase = await this.prisma.case.findUnique({
       where: { id },
       select: {
@@ -185,7 +200,6 @@ export class CasesService {
     const previousStatus = existingCase.status;
     const newStatus = dto.status;
 
-    // Update the case status
     const updatedCase = await this.prisma.case.update({
       where: { id },
       data: {
@@ -198,7 +212,6 @@ export class CasesService {
       },
     });
 
-    // Create audit log with status transition details
     await this.auditLogsService.create({
       caseId: id,
       userId,
@@ -218,7 +231,6 @@ export class CasesService {
 
   // ── Get dashboard metrics ──────────────────────────────────
   async getMetrics() {
-    // Run all count queries in parallel
     const [
       totalCases,
       newCases,
@@ -228,16 +240,11 @@ export class CasesService {
       highPriorityCases,
       caseTypeBreakdown,
     ] = await Promise.all([
-      // Total cases
       this.prisma.case.count(),
-
-      // By status
       this.prisma.case.count({ where: { status: 'NEW' } }),
       this.prisma.case.count({ where: { status: 'REVIEWING' } }),
       this.prisma.case.count({ where: { status: 'CONTACTED' } }),
       this.prisma.case.count({ where: { status: 'CLOSED' } }),
-
-      // High priority
       this.prisma.case.count({
         where: {
           aiAnalysis: {
@@ -245,8 +252,6 @@ export class CasesService {
           },
         },
       }),
-
-      // Case type breakdown via AI analysis
       this.prisma.aiAnalysis.groupBy({
         by: ['caseType'],
         _count: {
@@ -260,7 +265,6 @@ export class CasesService {
       }),
     ]);
 
-    // Format case type breakdown into a clean object
     const byCaseType = caseTypeBreakdown.reduce(
       (acc, item) => {
         acc[item.caseType] = item._count.caseType;

@@ -3,17 +3,17 @@ import { CasesController } from './cases.controller';
 import { CasesService } from './cases.service';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
 import { AuthModule } from '../auth/auth.module';
+import { AiModule } from '../ai/ai.module';
 
 @Module({
   imports: [
-    // AuditLogsModule provides AuditLogsService
     AuditLogsModule,
-    // AuthModule provides JwtAuthGuard and RolesGuard
     AuthModule,
+    // AiModule provides AiService for auto-analysis on creation
+    AiModule,
   ],
   controllers: [CasesController],
   providers: [CasesService],
-  // Export CasesService so DashboardModule can use it
   exports: [CasesService],
 })
 export class CasesModule {}
