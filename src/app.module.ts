@@ -10,16 +10,11 @@ import { DashboardModule } from './dashboard/dashboard.module';
 
 @Module({
   imports: [
-    // Makes ConfigService available everywhere without re-importing
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
     }),
-
-    // Database - global so all modules can inject PrismaService
     PrismaModule,
-
-    // Feature modules
     AuthModule,
     UsersModule,
     CasesModule,
