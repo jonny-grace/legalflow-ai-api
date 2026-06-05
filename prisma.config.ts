@@ -1,9 +1,9 @@
 import 'dotenv/config';
-import { defineConfig } from 'prisma/config';
+import { defineConfig, env } from 'prisma/config'; // Import env helper
 
 export default defineConfig({
   schema: 'prisma/schema.prisma',
   datasource: {
-    url: process.env.DATABASE_URL,
+    url: env('DATABASE_URL'), // Use the Prisma 7 env string evaluator
   },
 });
