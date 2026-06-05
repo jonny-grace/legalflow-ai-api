@@ -1,8 +1,3 @@
-# ============================================================
-# LegalFlow AI API — Dockerfile
-# Multi-stage build for optimized production image
-# ============================================================
-
 # ── Stage 1: Dependencies ────────────────────────────────────
 FROM node:22-alpine AS deps
 
@@ -10,16 +5,14 @@ RUN apk add --no-cache libc6-compat openssl
 
 WORKDIR /app
 
-# Copy package files
 COPY package*.json ./
 COPY prisma ./prisma/
+COPY prisma.config.ts ./
+COPY tsconfig.json ./
 
-# Install ALL dependencies including devDependencies
-# We need @nestjs/cli from devDeps to build
 RUN npm ci
 
-# Generate Prisma client
-RUN npx prisma generate
+RUN DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy" npx prisma generate
 
 # ── Stage 2: Builder ─────────────────────────────────────────
 FROM node:22-alpine AS builder
@@ -28,25 +21,28 @@ RUN apk add --no-cache libc6-compat openssl
 
 WORKDIR /app
 
-# Copy dependencies from deps stage
+# Copy deps
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/prisma ./prisma
+COPY --from=deps /app/prisma.config.ts ./
+COPY --from=deps /app/tsconfig.json ./
 
-# Copy all source files
-COPY . .
+# Copy source
+COPY src ./src
+COPY nest-cli.json ./
+COPY package*.json ./
 
-# Build using nest build (via npm run build)
-RUN npm run build
+# Build — dummy URL needed because prisma.config.ts is present
+RUN DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy" npm run build
 
-# Verify the build produced main.js
-RUN test -f dist/main.js && echo "✅ Build successful" || (echo "❌ dist/main.js missing" && exit 1)
+# Show what was built
+RUN echo "=== dist/ ===" && find dist -name "*.js" | head -20
 
 # ── Stage 3: Production Runner ────────────────────────────────
 FROM node:22-alpine AS runner
 
 RUN apk add --no-cache libc6-compat openssl
 
-# Create non-root user for security
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nestjs
 
@@ -54,22 +50,23 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
-# Copy only production artifacts
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/prisma.config.ts ./
+COPY --from=builder /app/tsconfig.json ./
 COPY package*.json ./
 
-# Set ownership
+COPY scripts/entrypoint.sh ./scripts/entrypoint.sh
+
 RUN chown -R nestjs:nodejs /app
+RUN chmod +x ./scripts/entrypoint.sh
 
 USER nestjs
 
 EXPOSE 3001
 
-# Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
   CMD node -e "require('http').get('http://localhost:3001/api/health', (r) => { process.exit(r.statusCode === 200 ? 0 : 1) })" || exit 1
 
-# Run migrations then start server
-CMD ["sh", "-c", "npx prisma migrate deploy --schema prisma/schema.prisma && node dist/main"]
+CMD ["./scripts/entrypoint.sh"]
