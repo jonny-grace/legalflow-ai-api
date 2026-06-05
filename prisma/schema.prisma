@@ -1,0 +1,122 @@
+// ============================================================
+// LegalFlow AI — Database Schema
+// ============================================================
+// Database:  PostgreSQL (Neon)
+// ORM:       Prisma
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum Role {
+  ADMIN
+  REVIEWER
+}
+
+enum Status {
+  NEW
+  REVIEWING
+  CONTACTED
+  CLOSED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+// ============================================================
+// MODELS
+// ============================================================
+
+// ------------------------------------------------------------
+// User
+// Law firm staff who access the dashboard
+// ------------------------------------------------------------
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  password  String
+  role      Role     @default(REVIEWER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  auditLogs AuditLog[]
+
+  @@map("users")
+}
+
+// ------------------------------------------------------------
+// Case
+// A client intake submission
+// ------------------------------------------------------------
+model Case {
+  id          String   @id @default(cuid())
+  clientName  String
+  email       String
+  phone       String?
+  description String   @db.Text
+  status      Status   @default(NEW)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  aiAnalysis AiAnalysis?
+  auditLogs  AuditLog[]
+
+  @@map("cases")
+}
+
+// ------------------------------------------------------------
+// AiAnalysis
+// Gemini analysis result for a case
+// Stored separately so it can be regenerated independently
+// ------------------------------------------------------------
+model AiAnalysis {
+  id                  String   @id @default(cuid())
+  caseId              String   @unique
+  caseType            String
+  priority            Priority
+  summary             String   @db.Text
+  missingInformation  String[]
+  recommendedAction   String   @db.Text
+  confidenceScore     Float?
+  createdAt           DateTime @default(now())
+
+  // Relations
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@map("ai_analyses")
+}
+
+// ------------------------------------------------------------
+// AuditLog
+// Every significant action on a case is recorded here
+// This table is append-only — never update or delete rows
+// ------------------------------------------------------------
+model AuditLog {
+  id        String   @id @default(cuid())
+  caseId    String
+  userId    String?
+  action    String
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  // Relations
+  case Case  @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  user User? @relation(fields: [userId], references: [id])
+
+  @@map("audit_logs")
+}
