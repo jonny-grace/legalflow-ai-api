@@ -1,0 +1,81 @@
+name: CD
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+jobs:
+  # ── Deploy to Production ───────────────────────────────────
+  deploy:
+    name: Deploy to Render
+    runs-on: ubuntu-latest
+
+    # Only deploy if CI passed
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/legalflow-ai-api
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Trigger Render Deploy
+        run: |
+          curl -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}" \
+            -H "Content-Type: application/json"
+
+      - name: Wait for deployment
+        run: |
+          echo "Waiting 60 seconds for Render to deploy..."
+          sleep 60
+
+      - name: Smoke test production
+        run: |
+          echo "Testing production health endpoint..."
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
+            https://legalflow-api.onrender.com/api/health)
+
+          if [ "$RESPONSE" = "200" ]; then
+            echo "✅ Production health check passed (HTTP $RESPONSE)"
+          else
+            echo "❌ Production health check failed (HTTP $RESPONSE)"
+            exit 1
+          fi
+
+      - name: Notify deployment status
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "✅ Deployment to production succeeded"
+          else
+            echo "❌ Deployment to production failed"
+          fi
