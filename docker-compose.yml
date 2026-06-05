@@ -1,7 +1,6 @@
 version: '3.8'
 
 services:
-  # ── PostgreSQL Database ──────────────────────────────────
   postgres:
     image: postgres:16-alpine
     container_name: legalflow_postgres
@@ -14,13 +13,7 @@ services:
       - '5432:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U postgres']
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
-  # ── NestJS API ───────────────────────────────────────────
   api:
     build:
       context: .
@@ -43,12 +36,10 @@ services:
         condition: service_healthy
     command: >
       sh -c "npx prisma migrate deploy &&
-             npx prisma db seed &&
-             npm run start:dev"
+             node dist/main"
     volumes:
       - ./src:/app/src
       - ./prisma:/app/prisma
 
 volumes:
   postgres_data:
-    driver: local
