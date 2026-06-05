@@ -14,7 +14,7 @@ COPY nest-cli.json ./
 
 RUN npm ci
 
-# Prisma generate (safe dummy env for build time)
+# Prisma generate (safe dummy env)
 ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy"
 RUN npx prisma generate
 
@@ -27,21 +27,18 @@ FROM node:22-alpine AS builder
 RUN apk add --no-cache libc6-compat openssl
 WORKDIR /app
 
-# copy everything needed (IMPORTANT FIX)
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
 ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy"
 
-# Build Nest app
 RUN npm run build
 
-# Verify output
 RUN echo "=== dist output ===" && find dist -name "*.js" | head -20
 
 
 # ─────────────────────────────────────────────
-# Stage 3: Production Runner
+# Stage 3: Production Runner (FIXED PRISMA HERE)
 # ─────────────────────────────────────────────
 FROM node:22-alpine AS runner
 
@@ -55,15 +52,20 @@ ENV NODE_ENV=production
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nestjs
 
-# install production deps only
+# install production dependencies ONLY
 COPY package*.json ./
 RUN npm ci --omit=dev
 
-# copy built app
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/prisma ./prisma
+# IMPORTANT: copy prisma schema FIRST
+COPY prisma ./prisma
 
-# prisma runtime config (if needed)
+# 🔥 FIX: generate Prisma client in production stage
+RUN npx prisma generate
+
+# copy built application
+COPY --from=builder /app/dist ./dist
+
+# optional runtime config
 COPY prisma.config.js ./
 
 # entrypoint
@@ -75,7 +77,7 @@ USER nestjs
 
 EXPOSE 3001
 
-# healthcheck (Render-friendly)
+# healthcheck (Render compatible)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
   CMD node -e "require('http').get('http://localhost:3001/api/health', r => process.exit(r.statusCode === 200 ? 0 : 1))"
 
