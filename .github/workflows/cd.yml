@@ -27,7 +27,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/legalflow-ai-api
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/legalflow-api
           tags: |
             type=ref,event=branch
             type=sha,prefix=sha-
